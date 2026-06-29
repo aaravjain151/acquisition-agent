@@ -1,0 +1,8 @@
+boto3==1.43.36
+botocore==1.43.36
+langchain-aws==1.6.1
+langchain-core==1.4.8
+langgraph==1.2.6
+langsmith==0.9.3
+python-dotenv==1.2.2
+tavily-python==0.7.26

@@ -1,18 +1,14 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "graph"))
-
 import argparse
 from datetime import datetime
 from pathlib import Path
-from graph import graph
-
-def slugify(s: str) -> str:
-    """Convert string to slug for filename."""
-    return s.lower().replace(" ", "-").replace(",", "").replace(".", "")
+# Imports use bare package names (graph, utils) because `python src/main.py`
+# puts src/ on sys.path[0]. Tests import via src.graph.graph because pytest
+# adds the repo root. Both resolve to the same files.
+from graph.graph import graph
+from utils import slugify
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -33,16 +29,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     target = f"{args.target} in {args.location}"
-    config = {"configurable": {"thread_id": "demo-1"}}
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    slug = slugify(f"{args.target}_{args.location}")
+    thread_id = f"{slug}-{timestamp}"
+    config = {"configurable": {"thread_id": thread_id}}
     
     print(f"\nStarting acquisition research for: {target}\n")
     result = graph.invoke({"target": target}, config)
 
     # Save report to reports/
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    slug = slugify(f"{args.target}_{args.location}")
     report_path = Path(__file__).parent.parent / "reports" / f"{timestamp}_{slug}.md"
-    report_path.parent.mkdir(exist_ok=True)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     
     report_content = f"""# Acquisition Research Report: {args.target} in {args.location}
 

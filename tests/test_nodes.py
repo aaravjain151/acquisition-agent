@@ -1,17 +1,15 @@
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 from src.graph.graph import (
     analyze_viability, analyze_buildout, analyze_profitability,
-    analyze_competitive, synthesize_report, evaluate,
-    assess_research, refine_research,
+    analyze_competitive, synthesize_report, evaluate, scope_target,
 )
 
 _BASE_STATE = {
     "target": "AC repair in LA",
     "scope": "Test scope. Diligence questions: market size? competitors? margins?",
     "research": '{"market_size": "$5B", "top_players": ["ServiceTitan", "Aire"], "unit_economics": "40% gross margin", "regulatory": ["EPA 608"], "cac_channels": ["Google Ads"]}',
-    "research_quality": "",
-    "research_iterations": 0,
     "viability": "",
     "buildout_costs": "",
     "profitability": "",
@@ -75,74 +73,59 @@ class TestAnalysisNodes(unittest.TestCase):
         self.assertIn("GO", result["evaluation"])
 
 
-class TestAdaptiveResearchLoop(unittest.TestCase):
+class TestScopeTarget(unittest.TestCase):
 
-    def test_assess_research_sufficient(self):
+    def test_scope_target_returns_scope_key(self):
+        state = {**_BASE_STATE}
         mock_llm = MagicMock()
-        mock_llm.invoke.return_value.content = "SUFFICIENT: Data covers market size, competitors, and margins adequately."
-        with patch('src.graph.graph.llm_haiku', mock_llm):
-            result = assess_research(_BASE_STATE)
-        self.assertIn("research_quality", result)
-        self.assertTrue(result["research_quality"].startswith("SUFFICIENT"))
+        mock_llm.invoke.return_value.content = "5 diligence questions for AC repair."
+        with patch('src.graph.graph.llm_sonnet', mock_llm):
+            result = scope_target(state)
+        self.assertIn("scope", result)
+        self.assertEqual(result["scope"], "5 diligence questions for AC repair.")
+        mock_llm.invoke.assert_called_once()
 
-    def test_assess_research_insufficient(self):
-        sparse_state = {**_BASE_STATE, "research": "Limited data available."}
-        mock_llm = MagicMock()
-        mock_llm.invoke.return_value.content = "INSUFFICIENT: Missing unit economics and regulatory data."
-        with patch('src.graph.graph.llm_haiku', mock_llm):
-            result = assess_research(sparse_state)
-        self.assertIn("research_quality", result)
-        self.assertTrue(result["research_quality"].startswith("INSUFFICIENT"))
 
-    def test_refine_research_appends_data(self):
-        insufficient_state = {
-            **_BASE_STATE,
-            "research": "Initial sparse research.",
-            "research_quality": "INSUFFICIENT: Missing unit economics.",
-            "research_iterations": 0,
-        }
-        mock_llm = MagicMock()
-        mock_llm.invoke.return_value.content = "AC repair profit margins Los Angeles\nHVAC technician salary California\nAC service pricing 2024"
+class TestSynthesisCapTruncation(unittest.TestCase):
 
-        mock_search = MagicMock()
-        from research.search import SearchResult
-        mock_search.search.return_value = [
-            SearchResult(title="AC margins", url="http://example.com", snippet="HVAC gross margin 35-45%")
-        ]
-        with patch('src.graph.graph.llm_haiku', mock_llm), \
-             patch('src.graph.graph.TavilySearchProvider', return_value=mock_search):
-            result = refine_research(insufficient_state)
-
-        self.assertIn("research", result)
-        self.assertIn("ADDITIONAL RESEARCH", result["research"])
-        self.assertEqual(result["research_iterations"], 1)
-
-    def test_route_exits_after_max_iterations(self):
-        from src.graph.graph import _route_after_assessment
+    def test_synthesize_truncates_long_pillar_inputs(self):
+        long_text = "X" * 5000
         state = {
             **_BASE_STATE,
-            "research_quality": "INSUFFICIENT: Still missing data.",
-            "research_iterations": 2,
+            "viability": long_text,
+            "buildout_costs": long_text,
+            "profitability": long_text,
+            "competitive_advantage": long_text,
         }
-        self.assertEqual(_route_after_assessment(state), "proceed")
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value.content = "Report"
 
-    def test_route_loops_when_insufficient(self):
-        from src.graph.graph import _route_after_assessment
-        state = {
-            **_BASE_STATE,
-            "research_quality": "INSUFFICIENT: Missing key data.",
-            "research_iterations": 0,
-        }
-        self.assertEqual(_route_after_assessment(state), "loop")
+        with patch('src.graph.graph.llm_sonnet', mock_llm):
+            synthesize_report(state)
 
-    def test_route_proceeds_when_sufficient(self):
-        from src.graph.graph import _route_after_assessment
-        state = {
-            **_BASE_STATE,
-            "research_quality": "SUFFICIENT: All key areas covered.",
-            "research_iterations": 0,
-        }
-        self.assertEqual(_route_after_assessment(state), "proceed")
+        call_content = mock_llm.invoke.call_args[0][0][1].content
+        # Each pillar capped at 3000 chars + "…"; total prompt must be well under 5000*4
+        self.assertLess(len(call_content), 15000)
+        self.assertIn("…", call_content)
+
+
+class TestSluggify(unittest.TestCase):
+
+    def setUp(self):
+        from utils import slugify
+        self.slugify = slugify
+
+    def test_slash_replaced(self):
+        self.assertEqual(self.slugify("AC/HVAC repair"), "ac-hvac-repair")
+
+    def test_ampersand_replaced(self):
+        self.assertEqual(self.slugify("M&A Services"), "manda-services")
+
+    def test_parens_stripped(self):
+        self.assertEqual(self.slugify("Tech (B2B)"), "tech-b2b")
+
+    def test_spaces_hyphenated(self):
+        self.assertEqual(self.slugify("Los Angeles, CA"), "los-angeles-ca")
 
 
 if __name__ == "__main__":

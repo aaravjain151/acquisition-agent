@@ -1,3 +1,6 @@
 [tool.pytest.ini_options]
-pythonpath = [".", "src", "src/graph"]
-markers = ["integration: marks tests as integration tests (requires live API keys)"]
+pythonpath = [".", "src"]
+markers = [
+    "integration: requires live API keys (Tavily + Bedrock)",
+    "smoke: end-to-end pipeline test (requires live API keys)",
+]

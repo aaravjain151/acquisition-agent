@@ -1,100 +1,104 @@
 # Acquisition Research Agent
 
-A CLI agent that evaluates small/mid-size businesses for acquisition potential and produces a McKinsey-style report.
-
-## What it does
-
-1. **Scopes the target** — Sonnet defines 5 key diligence questions for the business category
-2. **Researches the market** — Tavily web search extracts structured intelligence (market size, competitors, unit economics, regulatory, CAC channels)
-3. **Adaptively loops** — Haiku self-assesses data quality; if gaps exist, generates targeted follow-up queries and re-searches (up to 2 extra passes)
-4. **Analyzes in parallel** — 4 Haiku nodes run simultaneously: market viability, build-out costs, profitability, competitive position
-5. **Synthesizes the report** — Sonnet writes an 8-section McKinsey-style report
-6. **Evaluates** — Sonnet produces a weighted scorecard and GO / NO-GO / PROCEED WITH CAUTION recommendation
-
-Reports are saved to `reports/` as timestamped markdown files.
+CLI agent that evaluates small/mid-size businesses for acquisition potential and produces a McKinsey-style report.
 
 ## Quickstart
 
 ```bash
-# Install dependencies
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-pip install -r requirements-dev.txt
 
-# Configure API keys
-cp .env.example .env
-# Edit .env — add AWS credentials and TAVILY_API_KEY
+cp .env.example .env   # fill in AWS + Tavily keys
 
-# Run
 python src/main.py --target "Air conditioning repair services" --location "Los Angeles, CA"
 ```
+
+Report is saved to `reports/YYYYMMDD_HHMM_<slug>.md` and printed to terminal.
+
+## Pipeline
+
+```
+scope_target (Sonnet)
+      │
+      ▼
+  research (Tavily → Haiku extraction)
+      │
+      ├──────────────────────────────────┐
+      ▼                                  ▼
+analyze_viability   analyze_buildout   analyze_profitability   analyze_competitive
+      │                   │                    │                        │
+      └───────────────────┴────────────────────┴────────────────────────┘
+                                      │
+                              synthesize_report (Sonnet)
+                                      │
+                                 evaluate (Sonnet)
+                                      │
+                                    END
+```
+
+Four analysis nodes run **in parallel** (LangGraph fan-out/fan-in). Each run gets a unique `thread_id` based on slug + timestamp so InMemorySaver checkpoints never bleed between invocations.
+
+## Report sections
+
+| Section | Content |
+|---------|---------|
+| Executive Recommendation | GO / NO-GO / PROCEED WITH CAUTION + rationale |
+| Market Attractiveness | TAM, CAGR, demand drivers |
+| Competitive Position | Concentration, moat, barriers to entry |
+| Unit Economics | Margin model, CAC, LTV, pricing power |
+| Automation Opportunity | Build cost, ROI, timeline |
+| Risk Profile | Regulatory, operational, market risks |
+| Acquisition Scorecard | 5–7 weighted criteria, 0–10 scale |
+| Assumptions & Limitations | Data quality, recency, gaps |
 
 ## Requirements
 
 - Python 3.12+
-- AWS credentials with Bedrock access (`us-west-2`)
-  - Models: `us.anthropic.claude-haiku-4-5-20251001-v1:0`, `us.anthropic.claude-sonnet-4-5-20250929-v1:0`
+- AWS credentials with Bedrock access in `us-west-2`
+  - `us.anthropic.claude-haiku-4-5-20251001-v1:0`
+  - `us.anthropic.claude-sonnet-4-5-20250929-v1:0`
   - Requires Anthropic use-case form approval in the AWS Bedrock console
-- `TAVILY_API_KEY` for live web search (falls back to `[SIMULATED]` data if missing)
+- `TAVILY_API_KEY` for live web search — omit to run with `[SIMULATED]` fallback data
 
 ## Environment variables
+
+Copy `.env.example` to `.env` and fill in:
 
 ```
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 AWS_DEFAULT_REGION=us-west-2
-TAVILY_API_KEY=...
-```
-
-## Report format
-
-Each report includes:
-
-- **Executive Recommendation** — GO / NO-GO / PROCEED WITH CAUTION with rationale
-- **Market Attractiveness** — TAM, growth rate, demand drivers
-- **Competitive Position** — market concentration, moat, barriers to entry
-- **Unit Economics** — margin model, CAC, LTV, pricing power
-- **Automation Opportunity** — build cost, ROI, implementation timeline
-- **Risk Profile** — regulatory, operational, market risks
-- **Acquisition Scorecard** — 5–7 weighted criteria scored 0–10
-- **Assumptions & Limitations** — data quality, recency, gaps
-
-## Pipeline architecture
-
-```
-scope_target (Sonnet)
-    │
-    ▼
-research (Tavily + Haiku)
-    │
-    ▼
-assess_research (Haiku) ◄─────────────────┐
-    │                                      │
-    ├─ SUFFICIENT ──► start_analysis       │
-    │                  ├─ analyze_viability│
-    │                  ├─ analyze_buildout │  (parallel)
-    │                  ├─ analyze_profit   │
-    │                  └─ analyze_competitive
-    │                         │
-    │                  synthesize_report (Sonnet)
-    │                         │
-    │                    evaluate (Sonnet)
-    │                         │
-    │                        END
-    │
-    └─ INSUFFICIENT ──► refine_research (Haiku + Tavily) ─┘
-                         (max 2 extra passes)
+TAVILY_API_KEY=tvly-...
 ```
 
 ## Tests
 
 ```bash
-pytest tests/ -v
+pytest tests/ -v          # 26 unit tests + 1 skipped integration
+pytest tests/ -m smoke    # smoke tests only (requires live keys)
 ```
 
-## Models used
+## Project layout
+
+```
+src/
+  main.py          # CLI entry point
+  utils.py         # slugify
+  graph/
+    graph.py       # LangGraph pipeline + all node functions
+    state.py       # AgentState TypedDict
+  research/
+    queries.py     # search query builder
+    search.py      # TavilySearchProvider + MockSearchProvider
+tests/
+reports/           # generated reports — gitignored, not committed
+```
+
+> **Note:** `reports/` is in `.gitignore`. Generated markdown files stay local and don't travel with the repo. Commit a specific report manually if you want to share one.
+
+## Models
 
 | Role | Model |
 |------|-------|
-| Scope, synthesis, evaluation | Claude Sonnet 4.5 (via Bedrock) |
-| Research extraction, analysis, assessment | Claude Haiku 4.5 (via Bedrock) |
+| Scope definition, synthesis, evaluation | Claude Sonnet 4.5 (Bedrock, 300 s timeout) |
+| Research extraction, pillar analysis | Claude Haiku 4.5 (Bedrock, 120 s timeout) |

@@ -18,13 +18,12 @@ def build_search_queries(
     if not base:
         raise ValueError("target must be a non-empty string")
 
-    topics_limit = max_queries
     if scope.strip():
-        topics_limit = max(1, max_queries - 1)
-
-    queries = [f"{base} {topic}" for topic in RESEARCH_TOPICS[:topics_limit]]
-
-    if scope.strip():
+        # Reserve one slot for the authoritative-source query; it always wins over topics.
+        topics_limit = max(0, max_queries - 1)
+        queries = [f"{base} {topic}" for topic in RESEARCH_TOPICS[:topics_limit]]
         queries.append(f"{base} industry outlook site:.gov OR site:.edu")
+    else:
+        queries = [f"{base} {topic}" for topic in RESEARCH_TOPICS[:max_queries]]
 
     return queries[:max_queries]

@@ -9,7 +9,7 @@ TARGET = "Air conditioning repair services in Los Angeles, CA"
 def test_build_search_queries_returns_diligence_topics():
     queries = build_search_queries(TARGET)
 
-    assert len(queries) == len(RESEARCH_TOPICS)
+    assert len(queries) == min(len(RESEARCH_TOPICS), 5)
     assert all(TARGET in query for query in queries)
     assert queries[0].endswith(RESEARCH_TOPICS[0])
 
@@ -30,3 +30,15 @@ def test_build_search_queries_adds_authoritative_source_query_when_scope_present
 def test_build_search_queries_rejects_empty_target():
     with pytest.raises(ValueError, match="non-empty"):
         build_search_queries("   ")
+
+
+def test_build_search_queries_max_queries_exceeds_topics():
+    queries = build_search_queries(TARGET, max_queries=99)
+    assert len(queries) == len(RESEARCH_TOPICS)
+
+
+def test_build_search_queries_scope_query_not_dropped_at_min_queries():
+    # max_queries=2 with scope: 1 topic + 1 scope query = 2 total, none dropped
+    queries = build_search_queries(TARGET, scope="HVAC contractors", max_queries=2)
+    assert len(queries) == 2
+    assert any("site:.gov OR site:.edu" in q for q in queries)
