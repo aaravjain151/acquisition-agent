@@ -1,4 +1,6 @@
-from research.search import MockSearchProvider, SearchResult
+import os
+import pytest
+from research.search import MockSearchProvider, SearchResult, TavilySearchProvider
 
 
 def test_mock_search_provider_returns_configured_results():
@@ -32,3 +34,14 @@ def test_mock_search_provider_returns_empty_for_unknown_query():
     provider = MockSearchProvider()
 
     assert provider.search("unknown query") == []
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not os.environ.get("TAVILY_API_KEY"), reason="TAVILY_API_KEY not set")
+def test_tavily_search_provider_returns_results():
+    provider = TavilySearchProvider()
+    results = provider.search("AC repair Los Angeles market size", max_results=2)
+
+    assert len(results) > 0
+    assert all(isinstance(r, SearchResult) for r in results)
+    assert all(r.snippet for r in results)

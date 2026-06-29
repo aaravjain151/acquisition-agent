@@ -1,1 +1,2 @@
 pytest>=8.0
+tavily-python>=0.3
